@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Prayer Times</title>
+  <meta charset="UTF-8">
+  <style>
+    input#address {
+      position: relative;
+      z-index: 1;
+      background-color: white;
+    }
+    .pac-container {
+      z-index: 9999 !important;
+    }
+    #advanced-settings {
+      margin-top: 10px;
+      display: none;
+      border: 1px solid #ccc;
+      padding: 10px;
+      width: 300px;
+      background: #f9f9f9;
+    }
+    .current {
+      font-weight: bold;
+      color: green;
+    }
+    #calendar-view {
+      display: none;
+      margin-top: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 5px;
+      text-align: center;
+    }
+    tr.today {
+      background-color: #e0ffe0;
+      font-weight: bold;
+    }
+  </style>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB2eQsSmGj4PJGF5cUKkHKtWaLxA2-0pI4&libraries=places"></script>
+</head>
+<body>
+  <h2>Prayer Times for <span id="date-label"></span></h2>
+
+  <button onclick="useMyLocation()">Use My Location</button>
+  <br><br>
+
+  <input type="text" id="address" placeholder="Enter city or address" size="50" autocomplete="street-address">
+
+  <p id="location-display" style="font-weight: bold;"></p>
+
+  <button onclick="toggleAdvanced()">Show Advanced Settings</button>
+  <div id="advanced-settings">
+    <label>
+      Time Format:
+      <select id="time-format">
+        <option value="1" selected>12-hour</option>
+        <option value="0">24-hour</option>
+      </select>
+    </label>
+    <br><br>
+    <label>
+      <input type="checkbox" id="show-both" checked>
+      Show Hanafi + Shafi Asr
+    </label>
+    <br><br>
+    <label>
+      Isha Calculation Method:
+      <select id="calc-method">
+        <option value="0" selected>Hanafi General</option>
+        <option value="1">Hanafi Shafaq Abyad</option>
+        <option value="2">Shafi Shafaq Ahmar</option>
+        <option value="3">Shia Jafari</option>
+      </select>
+    </label>
+    <br><br>
+    <button onclick="updatePrayerTimes()">Update Times</button>
+  </div>
+
+  <br>
+  <div>
+    <button onclick="changeDate(-1)">←</button>
+    <input type="date" id="date-picker">
+    <button onclick="changeDate(1)">→</button>
+    <button onclick="showCalendar()">View Monthly Calendar</button>
+  </div>
+
+  <div id="prayer-times" style="margin-top: 20px;">Loading...</div>
+
+  <div id="calendar-view">
+    <button onclick="hideCalendar()">Back to Today View</button>
+    <div id="calendar-table"></div>
+  </div>
+
+<script>
+  let globalDataByYear = {};
+  let globalLat, globalLon, globalTz;
+  let currentMonthIndex = new Date().getMonth();
+  let currentCalendarYear = new Date().getFullYear();
+
+  async function fetchPrayerData(year, callback) {
+    const time = document.getElementById('time-format').value;
+    const both = document.getElementById('show-both').checked ? 'true' : 'false';
+    const method = document.getElementById('calc-method').value;
+
+    const url = `https://moonsighting.ahmedbukhamsin.sa/time_json.php?year=${year}&tz=${encodeURIComponent(globalTz)}&lat=${globalLat}&lon=${globalLon}&method=${method}&both=${both}&time=${time}`;
+
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      globalDataByYear[year] = data;
+      if (callback) callback();
+    } catch (error) {
+      console.error("Failed to fetch data:", error);
+      document.getElementById('prayer-times').innerText = "Error loading data.";
+    }
+  }
+
+  function formatApiDate(date) {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const month = months[date.getMonth()];
+    const day = String(date.getDate()).padStart(2, '0');
+    const weekday = weekdays[date.getDay()];
+    return `${month} ${day} ${weekday}`;
+  }
+
+  function parseTimeToDate(timeStr, baseDate) {
+    const [h, m] = timeStr.trim().split(":").map(Number);
+    const d = new Date(baseDate);
+    d.setHours(h, m, 0, 0);
+    return d;
+  }
+
+  function renderPrayerTimes() {
+    const picker = document.getElementById('date-picker');
+    const [year, month, day] = picker.value.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    const todayFormatted = formatApiDate(date);
+    const data = globalDataByYear[year];
+    if (!data) return;
+
+    const entry = data.times.find(e => e.day.trim() === todayFormatted);
+    if (!entry) {
+      document.getElementById('prayer-times').innerText = "Today's data not found.";
+      return;
+    }
+
+    const t = entry.times;
+    const both = document.getElementById('show-both').checked ? 'true' : 'false';
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    const times = {
+      fajr: parseTimeToDate(t.fajr, date),
+      sunrise: parseTimeToDate(t.sunrise, date),
+      dhuhr: parseTimeToDate(t.dhuhr, date),
+      asr_s: parseTimeToDate(t.asr_s, date),
+      asr_h: parseTimeToDate(t.asr_h, date),
+      maghrib: parseTimeToDate(t.maghrib, date),
+      isha: parseTimeToDate(t.isha, date),
+    };
+
+    const sequence = [
+      { name: "Fajr", key: "fajr" },
+      { name: "Sunrise", key: "sunrise" },
+      { name: "Dhuhr", key: "dhuhr" },
+      { name: "Asr (Shafi’i)", key: "asr_s" },
+      { name: "Asr (Hanafi)", key: "asr_h" },
+      { name: "Maghrib", key: "maghrib" },
+      { name: "Isha", key: "isha" }
+    ];
+
+    let currentIndex = -1;
+
+    if (isToday) {
+      for (let i = 0; i < sequence.length; i++) {
+        const key = sequence[i].key;
+        const currentTime = times[key];
+        const nextTime = i + 1 < sequence.length ? times[sequence[i + 1].key] : null;
+
+        if (now >= currentTime && (!nextTime || now < nextTime)) {
+          currentIndex = i;
+          break;
+        }
+      }
+
+      // If past the last prayer time, highlight the last
+      if (currentIndex === -1 && now >= times["isha"]) {
+      currentIndex = sequence.length - 1;
+    }
+    }
+
+
+    let html = `<ul><li><strong>Date:</strong> ${entry.day}</li>`;
+    sequence.forEach((item, i) => {
+      const time = t[item.key].trim();
+      const active = i === currentIndex ? " class='current'" : "";
+      html += `<li${active}>${item.name}: ${time}</li>`;
+    });
+    html += `</ul>`;
+    document.getElementById('prayer-times').innerHTML = html;
+    document.getElementById('date-label').textContent = todayFormatted;
+  }
+
+  function changeDate(offset) {
+    const picker = document.getElementById('date-picker');
+    const [year, month, day] = picker.value.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setDate(date.getDate() + offset);
+    picker.valueAsDate = date;
+
+
+    const newYear = date.getFullYear();
+    if (globalDataByYear[newYear]) {
+      renderPrayerTimes();
+    } else {
+      fetchPrayerData(newYear, renderPrayerTimes);
+    }
+  }
+
+  function showCalendar() {
+    const today = new Date();
+    currentMonthIndex = today.getMonth();
+    currentCalendarYear = today.getFullYear();
+    loadAndRenderCalendar(currentCalendarYear, currentMonthIndex);
+    document.getElementById("calendar-view").style.display = "block";
+    document.getElementById("prayer-times").style.display = "none";
+  }
+
+  function hideCalendar() {
+    document.getElementById("calendar-view").style.display = "none";
+    document.getElementById("prayer-times").style.display = "block";
+  }
+
+  function changeMonth(offset) {
+    currentMonthIndex += offset;
+    if (currentMonthIndex > 11) {
+      currentMonthIndex = 0;
+      currentCalendarYear++;
+    } else if (currentMonthIndex < 0) {
+      currentMonthIndex = 11;
+      currentCalendarYear--;
+    }
+    loadAndRenderCalendar(currentCalendarYear, currentMonthIndex);
+  }
+
+  function loadAndRenderCalendar(year, monthIndex) {
+    if (globalDataByYear[year]) {
+      renderCalendar(year, monthIndex);
+    } else {
+      fetchPrayerData(year, () => renderCalendar(year, monthIndex));
+    }
+  }
+
+  function renderCalendar(year, monthIndex) {
+    const data = globalDataByYear[year];
+    if (!data) return;
+
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthAbbr = months[monthIndex];
+    const todayFormatted = formatApiDate(new Date());
+
+    let html = `
+      <div style="margin-top:10px;">
+        <button onclick="changeMonth(-1)">← Previous</button>
+        <strong style="margin: 0 10px;">${months[monthIndex]} ${year} Calendar</strong>
+        <button onclick="changeMonth(1)">Next →</button>
+      </div>
+      <table>
+        <tr>
+          <th>Date</th><th>Fajr</th><th>Sunrise</th><th>Dhuhr</th>
+          <th>Asr (Shafi’i)</th><th>Asr (Hanafi)</th><th>Maghrib</th><th>Isha</th>
+        </tr>
+    `;
+
+    data.times.forEach(entry => {
+      if (entry.day.startsWith(monthAbbr)) {
+        const isToday = entry.day === todayFormatted;
+        const t = entry.times;
+        html += `<tr${isToday ? ' class="today"' : ''}>
+          <td>${entry.day}</td>
+          <td>${t.fajr.trim()}</td>
+          <td>${t.sunrise.trim()}</td>
+          <td>${t.dhuhr.trim()}</td>
+          <td>${t.asr_s.trim()}</td>
+          <td>${t.asr_h.trim()}</td>
+          <td>${t.maghrib.trim()}</td>
+          <td>${t.isha.trim()}</td>
+        </tr>`;
+      }
+    });
+
+    html += `</table>`;
+    document.getElementById('calendar-table').innerHTML = html;
+  }
+
+  async function getTimeZone(lat, lon) {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const url = `https://maps.googleapis.com/maps/api/timezone/json?location=${lat},${lon}&timestamp=${timestamp}&key=AIzaSyB2eQsSmGj4PJGF5cUKkHKtWaLxA2-0pI4`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return data.status === "OK" ? data.timeZoneId : Intl.DateTimeFormat().resolvedOptions().timeZone;
+  }
+
+  async function useMyLocation() {
+    if (!navigator.geolocation) return alert("Geolocation not supported.");
+    navigator.geolocation.getCurrentPosition(async pos => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      globalLat = lat;
+      globalLon = lon;
+      globalTz = await getTimeZone(lat, lon);
+
+      const reverseUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`;
+      const res = await fetch(reverseUrl);
+      const result = await res.json();
+      document.getElementById('address').value = result.display_name || `${lat}, ${lon}`;
+      document.getElementById('location-display').textContent = `Location: ${result.display_name}`;
+
+      const year = new Date().getFullYear();
+      fetchPrayerData(year, () => {
+        document.getElementById('date-picker').valueAsDate = new Date();
+        renderPrayerTimes();
+      });
+    });
+  }
+
+function initAutocomplete() {
+  const input = document.getElementById('address');
+  const autocomplete = new google.maps.places.Autocomplete(input, {
+    types: ['geocode'],
+    componentRestrictions: { country: 'us' }
+  });
+
+  autocomplete.addListener('place_changed', async () => {
+    const place = autocomplete.getPlace();
+    if (!place.geometry) {
+      alert("No location found. Please choose from the dropdown.");
+      return;
+    }
+
+    const lat = place.geometry.location.lat();
+    const lon = place.geometry.location.lng();
+    const tz = await getTimeZone(lat, lon);
+
+    document.getElementById('location-display').textContent = `Location: ${place.formatted_address}`;
+
+    globalLat = lat;
+    globalLon = lon;
+    globalTz = tz;
+
+    const selectedYear = new Date().getFullYear();
+    fetchPrayerData(selectedYear, () => {
+      document.getElementById('date-picker').valueAsDate = new Date();
+      renderPrayerTimes();
+    });
+  });
+}
+
+  window.onload = () => {
+    useMyLocation();
+    initAutocomplete();
+  };
+
+  document.getElementById('date-picker').addEventListener('change', () => {
+    const [year, month, day] = document.getElementById('date-picker').value.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    const yearOnly = date.getFullYear();
+    if (globalDataByYear[yearOnly]) {
+      renderPrayerTimes();
+    } else {
+      fetchPrayerData(yearOnly, renderPrayerTimes);
+  }
+});
+
+</script>
+
+
+</body>
+</html>
